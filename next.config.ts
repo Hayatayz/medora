@@ -1,7 +1,20 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  images: {
+    remotePatterns: [
+      {
+        protocol: "https",
+        hostname: "covers.openlibrary.org",
+      },
+    ],
+  },
+  // Allow large file uploads
+  experimental: {
+    serverActions: {
+      bodySizeLimit: "52mb",
+    },
+  },
 };
 
 export default nextConfig;

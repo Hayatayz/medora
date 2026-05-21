@@ -1,0 +1,270 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  password  String
+  avatar    String?
+  role      Role     @default(USER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  books              Book[]
+  bookmarks          Bookmark[]
+  highlights         Highlight[]
+  notes              Note[]
+  quizAttempts       QuizAttempt[]
+  readingProgress    ReadingProgress[]
+  studyStatistics    StudyStatistics[]
+  flashcardProgress  FlashcardProgress[]
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+model Book {
+  id          String   @id @default(cuid())
+  title       String
+  author      String?
+  description String?
+  coverUrl    String?
+  fileUrl     String
+  fileKey     String
+  fileSize    Int
+  pageCount   Int      @default(0)
+  category    String?
+  isProcessed Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  chapters             Chapter[]
+  bookmarks            Bookmark[]
+  highlights           Highlight[]
+  notes                Note[]
+  quizzes              Quiz[]
+  flashcards           Flashcard[]
+  summaries            Summary[]
+  readingProgress      ReadingProgress[]
+  videoRecommendations VideoRecommendation[]
+}
+
+model Chapter {
+  id         String   @id @default(cuid())
+  title      String
+  content    String   @db.Text
+  orderIndex Int
+  pageStart  Int
+  pageEnd    Int
+  createdAt  DateTime @default(now())
+
+  bookId String
+  book   Book   @relation(fields: [bookId], references: [id], onDelete: Cascade)
+
+  summaries            Summary[]
+  flashcards           Flashcard[]
+  quizzes              Quiz[]
+  highlights           Highlight[]
+  bookmarks            Bookmark[]
+  notes                Note[]
+  videoRecommendations VideoRecommendation[]
+}
+
+model Bookmark {
+  id         String   @id @default(cuid())
+  pageNumber Int
+  label      String?
+  createdAt  DateTime @default(now())
+
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bookId    String
+  book      Book     @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  chapterId String?
+  chapter   Chapter? @relation(fields: [chapterId], references: [id])
+}
+
+model Highlight {
+  id         String   @id @default(cuid())
+  text       String   @db.Text
+  color      String   @default("yellow")
+  pageNumber Int
+  position   Json
+  createdAt  DateTime @default(now())
+
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bookId    String
+  book      Book     @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  chapterId String?
+  chapter   Chapter? @relation(fields: [chapterId], references: [id])
+}
+
+model Note {
+  id         String   @id @default(cuid())
+  content    String   @db.Text
+  pageNumber Int?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bookId    String
+  book      Book     @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  chapterId String?
+  chapter   Chapter? @relation(fields: [chapterId], references: [id])
+}
+
+model Summary {
+  id        String      @id @default(cuid())
+  type      SummaryType @default(CONCISE)
+  content   String      @db.Text
+  keyTerms  Json        @default("[]")
+  createdAt DateTime    @default(now())
+
+  bookId    String
+  book      Book     @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  chapterId String?
+  chapter   Chapter? @relation(fields: [chapterId], references: [id])
+}
+
+enum SummaryType {
+  CONCISE
+  DETAILED
+  KEY_TERMS
+}
+
+model Flashcard {
+  id         String              @id @default(cuid())
+  front      String              @db.Text
+  back       String              @db.Text
+  difficulty FlashcardDifficulty @default(MEDIUM)
+  createdAt  DateTime            @default(now())
+
+  bookId    String
+  book      Book     @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  chapterId String?
+  chapter   Chapter? @relation(fields: [chapterId], references: [id])
+
+  progress FlashcardProgress[]
+}
+
+enum FlashcardDifficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+model FlashcardProgress {
+  id           String    @id @default(cuid())
+  lastStudied  DateTime  @default(now())
+  timesCorrect Int       @default(0)
+  timesWrong   Int       @default(0)
+  nextReview   DateTime?
+
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  flashcardId String
+  flashcard   Flashcard @relation(fields: [flashcardId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, flashcardId])
+}
+
+model Quiz {
+  id        String   @id @default(cuid())
+  title     String
+  timeLimit Int?
+  createdAt DateTime @default(now())
+
+  bookId    String
+  book      Book     @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  chapterId String?
+  chapter   Chapter? @relation(fields: [chapterId], references: [id])
+
+  questions    Question[]
+  quizAttempts QuizAttempt[]
+}
+
+model Question {
+  id          String  @id @default(cuid())
+  question    String  @db.Text
+  options     Json
+  answer      String
+  explanation String? @db.Text
+  orderIndex  Int     @default(0)
+
+  quizId String
+  quiz   Quiz   @relation(fields: [quizId], references: [id], onDelete: Cascade)
+}
+
+model QuizAttempt {
+  id             String   @id @default(cuid())
+  score          Int
+  totalQuestions Int
+  timeTaken      Int?
+  answers        Json
+  completedAt    DateTime @default(now())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  quizId String
+  quiz   Quiz   @relation(fields: [quizId], references: [id], onDelete: Cascade)
+}
+
+model VideoRecommendation {
+  id           String   @id @default(cuid())
+  videoId      String
+  title        String
+  thumbnailUrl String
+  channelName  String
+  duration     String?
+  createdAt    DateTime @default(now())
+
+  bookId    String
+  book      Book     @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  chapterId String?
+  chapter   Chapter? @relation(fields: [chapterId], references: [id])
+}
+
+model ReadingProgress {
+  id          String   @id @default(cuid())
+  currentPage Int      @default(0)
+  totalPages  Int      @default(0)
+  percentage  Float    @default(0)
+  lastReadAt  DateTime @default(now())
+  chapterId   String?
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bookId String
+  book   Book   @relation(fields: [bookId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, bookId])
+}
+
+model StudyStatistics {
+  id                 String   @id @default(cuid())
+  date               DateTime @default(now())
+  studyMinutes       Int      @default(0)
+  pagesRead          Int      @default(0)
+  flashcardsStudied  Int      @default(0)
+  quizzesTaken       Int      @default(0)
+  pomodorosCompleted Int      @default(0)
+  streakDay          Int      @default(0)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+}
