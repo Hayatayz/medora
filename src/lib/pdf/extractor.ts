@@ -3,12 +3,19 @@ export interface ExtractedPDF {
   pageCount: number;
 }
 
+import * as pdfParse from "pdf-parse";
+
 export async function extractPDFText(buffer: Buffer): Promise<ExtractedPDF> {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const pdfParseModule = await import("pdf-parse" as any);
-    const pdfParse = pdfParseModule.default ?? pdfParseModule;
-    const data = await pdfParse(buffer);
+    type PdfParseResult = {
+      text?: string;
+      numpages?: number;
+    };
+
+    const data = (await (pdfParse as unknown as (buf: Buffer) => Promise<PdfParseResult>)(
+      buffer
+    )) as PdfParseResult;
+
     return {
       text: data.text ?? "",
       pageCount: data.numpages ?? 0,
@@ -18,3 +25,4 @@ export async function extractPDFText(buffer: Buffer): Promise<ExtractedPDF> {
     return { text: "", pageCount: 0 };
   }
 }
+

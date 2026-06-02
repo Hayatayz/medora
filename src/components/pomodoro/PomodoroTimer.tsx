@@ -2,44 +2,56 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useReaderStore } from "@/store/readerStore";
-import { X, Play, Pause, RotateCcw, Settings, Coffee, Brain } from "lucide-react";
+import { X, Play, Pause, RotateCcw, Settings, Coffee, Brain, Volume2, VolumeX } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import axios from "axios";
+import { playSound, SOUND_OPTIONS, type SoundId } from "@/lib/audio/pomodoroSounds";
 
 type Mode = "work" | "short" | "long";
 
 const DEFAULTS: Record<Mode, number> = {
-  work: 25 * 60,
-  short: 5 * 60,
-  long: 15 * 60,
+  work:  25 * 60,
+  short:  5 * 60,
+  long:  15 * 60,
 };
 
 const MODE_LABELS: Record<Mode, string> = {
-  work: "Focus",
+  work:  "Focus",
   short: "Short Break",
-  long: "Long Break",
+  long:  "Long Break",
 };
 
 const MODE_COLORS: Record<Mode, string> = {
-  work: "#0F6E56",
+  work:  "#0F6E56",
   short: "#378ADD",
-  long: "#7C5CBF",
+  long:  "#7C5CBF",
 };
 
 export function PomodoroTimer() {
   const togglePomodoro = useReaderStore((s) => s.togglePomodoro);
-  const [mode, setMode] = useState<Mode>("work");
-  const [timeLeft, setTimeLeft] = useState(DEFAULTS.work);
-  const [running, setRunning] = useState(false);
-  const [sessions, setSessions] = useState(0);
+
+  const [mode,         setMode]         = useState<Mode>("work");
+  const [timeLeft,     setTimeLeft]     = useState(DEFAULTS.work);
+  const [running,      setRunning]      = useState(false);
+  const [sessions,     setSessions]     = useState(0);
   const [showSettings, setShowSettings] = useState(false);
-  const [durations, setDurations] = useState(DEFAULTS);
+  const [durations,    setDurations]    = useState(DEFAULTS);
+
+  // Sound settings
+  const [soundId,  setSoundId]  = useState<SoundId>("bell");
+  const [volume,   setVolume]   = useState(0.8);
+  const [muted,    setMuted]    = useState(false);
+
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const total = durations[mode];
+  const total    = durations[mode];
   const progress = ((total - timeLeft) / total) * 100;
-  const color = MODE_COLORS[mode];
+  const color    = MODE_COLORS[mode];
+
+  const ring = useCallback(() => {
+    if (!muted) playSound(soundId, volume);
+  }, [muted, soundId, volume]);
 
   const switchMode = useCallback(
     (m: Mode) => {
@@ -53,26 +65,25 @@ export function PomodoroTimer() {
 
   const handleSessionComplete = useCallback(
     async (completedMode: Mode) => {
+      ring();
+
       if (completedMode === "work") {
         const newSessions = sessions + 1;
         setSessions(newSessions);
         toast.success("Focus session complete! Time for a break. 🎉");
-        // Save to stats
         try {
           await axios.post("/api/stats", {
             pomodorosCompleted: 1,
             studyMinutes: Math.floor(durations.work / 60),
           });
-        } catch {
-          // silent
-        }
+        } catch { /* silent */ }
         switchMode("short");
       } else {
         toast.success("Break over! Ready to focus? 💪");
         switchMode("work");
       }
     },
-    [sessions, durations, switchMode]
+    [ring, sessions, durations, switchMode]
   );
 
   useEffect(() => {
@@ -91,9 +102,7 @@ export function PomodoroTimer() {
     } else {
       if (intervalRef.current) clearInterval(intervalRef.current);
     }
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [running, mode, handleSessionComplete]);
 
   function reset() {
@@ -104,8 +113,7 @@ export function PomodoroTimer() {
   const mins = String(Math.floor(timeLeft / 60)).padStart(2, "0");
   const secs = String(timeLeft % 60).padStart(2, "0");
 
-  // SVG circle
-  const r = 54;
+  const r    = 54;
   const circ = 2 * Math.PI * r;
   const dash = circ - (progress / 100) * circ;
 
@@ -118,11 +126,9 @@ export function PomodoroTimer() {
             className="w-5 h-5 rounded-md flex items-center justify-center"
             style={{ background: color }}
           >
-            {mode === "work" ? (
-              <Brain size={11} className="text-white" />
-            ) : (
-              <Coffee size={11} className="text-white" />
-            )}
+            {mode === "work"
+              ? <Brain  size={11} className="text-white" />
+              : <Coffee size={11} className="text-white" />}
           </div>
           <span className="text-sm font-semibold text-gray-900">Pomodoro</span>
           <span className="text-xs text-gray-400 bg-gray-100 rounded-full px-2 py-0.5">
@@ -130,6 +136,14 @@ export function PomodoroTimer() {
           </span>
         </div>
         <div className="flex items-center gap-1">
+          {/* Mute toggle */}
+          <button
+            onClick={() => setMuted(!muted)}
+            title={muted ? "Unmute" : "Mute alarm"}
+            className="w-7 h-7 rounded-lg hover:bg-gray-100 flex items-center justify-center text-gray-400 transition"
+          >
+            {muted ? <VolumeX size={13} /> : <Volume2 size={13} />}
+          </button>
           <button
             onClick={() => setShowSettings(!showSettings)}
             className="w-7 h-7 rounded-lg hover:bg-gray-100 flex items-center justify-center text-gray-400 transition"
@@ -148,11 +162,18 @@ export function PomodoroTimer() {
       {showSettings ? (
         <SettingsPanel
           durations={durations}
-          onChange={(m, v) => {
-            const newDurations = { ...durations, [m]: v * 60 };
-            setDurations(newDurations);
+          soundId={soundId}
+          volume={volume}
+          muted={muted}
+          onChangeDuration={(m, v) => {
+            const next = { ...durations, [m]: v * 60 };
+            setDurations(next);
             if (m === mode) setTimeLeft(v * 60);
           }}
+          onChangeSound={setSoundId}
+          onChangeVolume={setVolume}
+          onToggleMute={() => setMuted((p) => !p)}
+          onPreview={() => playSound(soundId, volume)}
           onClose={() => setShowSettings(false)}
         />
       ) : (
@@ -181,9 +202,7 @@ export function PomodoroTimer() {
               <svg className="w-full h-full -rotate-90" viewBox="0 0 120 120">
                 <circle cx="60" cy="60" r={r} fill="none" stroke="#F3F4F6" strokeWidth="8" />
                 <circle
-                  cx="60"
-                  cy="60"
-                  r={r}
+                  cx="60" cy="60" r={r}
                   fill="none"
                   stroke={color}
                   strokeWidth="8"
@@ -230,52 +249,146 @@ export function PomodoroTimer() {
           <p className="text-center text-xs text-gray-400 mt-1.5">
             {Math.round(progress)}% complete
           </p>
+
+          {/* Current sound indicator */}
+          <p className="text-center text-xs text-gray-300 mt-1">
+            {muted ? "🔇 Muted" : `${SOUND_OPTIONS.find((s) => s.id === soundId)?.emoji} ${SOUND_OPTIONS.find((s) => s.id === soundId)?.label}`}
+          </p>
         </div>
       )}
     </div>
   );
 }
 
+/* ─── Settings Panel ──────────────────────────────────────────────────── */
 function SettingsPanel({
   durations,
-  onChange,
+  soundId,
+  volume,
+  muted,
+  onChangeDuration,
+  onChangeSound,
+  onChangeVolume,
+  onToggleMute,
+  onPreview,
   onClose,
 }: {
   durations: Record<Mode, number>;
-  onChange: (mode: Mode, minutes: number) => void;
+  soundId: SoundId;
+  volume: number;
+  muted: boolean;
+  onChangeDuration: (mode: Mode, minutes: number) => void;
+  onChangeSound: (id: SoundId) => void;
+  onChangeVolume: (v: number) => void;
+  onToggleMute: () => void;
+  onPreview: () => void;
   onClose: () => void;
 }) {
   return (
-    <div className="p-4 space-y-3">
-      <p className="text-sm font-semibold text-gray-900 mb-3">Timer Settings</p>
-      {(["work", "short", "long"] as Mode[]).map((m) => (
-        <div key={m} className="flex items-center justify-between">
-          <label className="text-sm text-gray-600">{MODE_LABELS[m]}</label>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => onChange(m, Math.max(1, Math.floor(durations[m] / 60) - 1))}
-              className="w-6 h-6 rounded-lg bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-600 text-sm font-bold transition"
-            >
-              −
-            </button>
-            <span className="text-sm font-semibold text-gray-900 w-8 text-center tabular-nums">
-              {Math.floor(durations[m] / 60)}m
-            </span>
-            <button
-              onClick={() => onChange(m, Math.min(60, Math.floor(durations[m] / 60) + 1))}
-              className="w-6 h-6 rounded-lg bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-600 text-sm font-bold transition"
-            >
-              +
-            </button>
+    <div className="p-4 space-y-4 max-h-[420px] overflow-y-auto">
+      {/* Timer durations */}
+      <div>
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Timer</p>
+        {(["work", "short", "long"] as Mode[]).map((m) => (
+          <div key={m} className="flex items-center justify-between py-1.5">
+            <label className="text-sm text-gray-600">{MODE_LABELS[m]}</label>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => onChangeDuration(m, Math.max(1, Math.floor(durations[m] / 60) - 1))}
+                className="w-6 h-6 rounded-lg bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-600 text-sm font-bold transition"
+              >
+                −
+              </button>
+              <span className="text-sm font-semibold text-gray-900 w-8 text-center tabular-nums">
+                {Math.floor(durations[m] / 60)}m
+              </span>
+              <button
+                onClick={() => onChangeDuration(m, Math.min(60, Math.floor(durations[m] / 60) + 1))}
+                className="w-6 h-6 rounded-lg bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-600 text-sm font-bold transition"
+              >
+                +
+              </button>
+            </div>
           </div>
+        ))}
+      </div>
+
+      {/* Sound picker */}
+      <div>
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Alarm Sound</p>
+        <div className="grid grid-cols-1 gap-1">
+          {SOUND_OPTIONS.map((opt) => (
+            <button
+              key={opt.id}
+              onClick={() => onChangeSound(opt.id)}
+              className={cn(
+                "flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm transition text-left",
+                soundId === opt.id
+                  ? "bg-[#0F6E56]/10 text-[#0F6E56] font-medium ring-1 ring-[#0F6E56]/30"
+                  : "hover:bg-gray-50 text-gray-700"
+              )}
+            >
+              <span className="text-base">{opt.emoji}</span>
+              <span>{opt.label}</span>
+              {soundId === opt.id && (
+                <span className="ml-auto text-[10px] font-semibold text-[#0F6E56] bg-[#0F6E56]/10 px-1.5 py-0.5 rounded-full">
+                  Selected
+                </span>
+              )}
+            </button>
+          ))}
         </div>
-      ))}
-      <button
-        onClick={onClose}
-        className="w-full mt-2 bg-[#0F6E56] text-white py-2 rounded-xl text-sm font-medium hover:bg-[#085041] transition"
-      >
-        Save & Close
-      </button>
+      </div>
+
+      {/* Volume + mute */}
+      <div>
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Volume</p>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={onToggleMute}
+            className={cn(
+              "w-8 h-8 rounded-lg flex items-center justify-center transition flex-shrink-0",
+              muted ? "bg-red-50 text-red-400" : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+            )}
+          >
+            {muted ? <VolumeX size={14} /> : <Volume2 size={14} />}
+          </button>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={muted ? 0 : volume}
+            onChange={(e) => {
+              const v = parseFloat(e.target.value);
+              onChangeVolume(v);
+              if (v > 0 && muted) onToggleMute();
+            }}
+            disabled={muted}
+            className="flex-1 accent-[#0F6E56] disabled:opacity-40"
+          />
+          <span className="text-xs text-gray-400 w-8 text-right tabular-nums">
+            {muted ? "0%" : `${Math.round(volume * 100)}%`}
+          </span>
+        </div>
+      </div>
+
+      {/* Preview + Save */}
+      <div className="flex gap-2 pt-1">
+        <button
+          onClick={onPreview}
+          disabled={muted || soundId === "none"}
+          className="flex-1 py-2 rounded-xl border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 transition disabled:opacity-40"
+        >
+          Preview 🔊
+        </button>
+        <button
+          onClick={onClose}
+          className="flex-1 bg-[#0F6E56] text-white py-2 rounded-xl text-sm font-medium hover:bg-[#085041] transition"
+        >
+          Save & Close
+        </button>
+      </div>
     </div>
   );
 }

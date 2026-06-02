@@ -2,17 +2,21 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useReaderStore } from "@/store/readerStore";
-import { ChatBubble } from "./ChatBubble";
-import { ContextMenu } from "./ContextMenu";
-import { cn } from "@/lib/utils";
-import { Send, X, Loader2, Sparkles } from "lucide-react";
+import { X, Send, Loader2, Sparkles } from "lucide-react";
 import axios from "axios";
-import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 
 interface Message {
   role: "user" | "assistant";
   content: string;
 }
+
+const QUICK_ACTIONS = [
+  { label: "Summarize", prompt: "Summarize the selected text or current chapter." },
+  { label: "Explain this", prompt: "Explain this in simple terms." },
+  { label: "Quiz me", prompt: "Create 3 quiz questions based on this content." },
+  { label: "Proofread", prompt: "Proofread and correct this text." },
+];
 
 interface AIPanelProps {
   bookId: string;
@@ -21,14 +25,8 @@ interface AIPanelProps {
 }
 
 export function AIPanel({ bookId, chapterId, isDarkMode }: AIPanelProps) {
-  const { toggleAIPanel, selectedText, setSelectedText } = useReaderStore();
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      role: "assistant",
-      content:
-        "Hi! I'm your AI study assistant. Ask me anything about this book, or select text to get explanations, summaries, and more.",
-    },
-  ]);
+  const { selectedText, toggleAIPanel } = useReaderStore();
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -37,51 +35,38 @@ export function AIPanel({ bookId, chapterId, isDarkMode }: AIPanelProps) {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  async function sendMessage(text?: string) {
-    const msg = text ?? input.trim();
-    if (!msg || loading) return;
-
+  async function send(text: string) {
+    if (!text.trim() || loading) return;
+    const userMsg: Message = { role: "user", content: text };
+    setMessages((prev) => [...prev, userMsg]);
     setInput("");
-    setSelectedText("");
-    setMessages((prev) => [...prev, { role: "user", content: msg }]);
     setLoading(true);
 
     try {
       const { data } = await axios.post("/api/ai/chat", {
-        message: msg,
         bookId,
         chapterId,
+        message: text,
+        selectedText: selectedText || undefined,
       });
       setMessages((prev) => [...prev, { role: "assistant", content: data.response }]);
     } catch {
-      toast.error("AI is unavailable. Check your API key.");
       setMessages((prev) => [
         ...prev,
-        {
-          role: "assistant",
-          content: "Sorry, I couldn't process that. Please check your OpenAI API key in .env.",
-        },
+        { role: "assistant", content: "Sorry, I couldn't process that. Please try again." },
       ]);
     } finally {
       setLoading(false);
     }
   }
 
-  function handleContextAction(action: string, text: string) {
-    const prompts: Record<string, string> = {
-      explain: `Explain this in simple terms: "${text}"`,
-      simplify: `Simplify this text for easier understanding: "${text}"`,
-      examples: `Give me 2-3 real-world examples related to: "${text}"`,
-      translate: `Translate this to simple English and explain key terms: "${text}"`,
-    };
-    sendMessage(prompts[action] ?? `Tell me about: "${text}"`);
-  }
-
   return (
     <div
       className={cn(
         "w-80 flex flex-col border-l h-full",
-        isDarkMode ? "bg-gray-900 border-gray-700" : "bg-white border-gray-100"
+        isDarkMode
+          ? "bg-gray-900 border-gray-700 text-white"
+          : "bg-white border-gray-100 text-gray-900"
       )}
     >
       {/* Header */}
@@ -92,62 +77,77 @@ export function AIPanel({ bookId, chapterId, isDarkMode }: AIPanelProps) {
         )}
       >
         <div className="flex items-center gap-2">
-          <div className="w-6 h-6 bg-[#0F6E56] rounded-lg flex items-center justify-center">
-            <Sparkles size={12} className="text-white" />
-          </div>
-          <p className={cn("text-sm font-semibold", isDarkMode ? "text-white" : "text-gray-900")}>
-            AI Assistant
-          </p>
+          <Sparkles size={16} className="text-[#0F6E56]" />
+          <span className="font-semibold text-sm">AI Assistant</span>
         </div>
         <button
           onClick={toggleAIPanel}
           className={cn(
-            "w-7 h-7 rounded-lg flex items-center justify-center transition",
-            isDarkMode ? "text-gray-400 hover:bg-gray-700" : "text-gray-400 hover:bg-gray-100"
+            "p-1 rounded-lg transition",
+            isDarkMode ? "hover:bg-gray-800" : "hover:bg-gray-100"
           )}
         >
-          <X size={14} />
+          <X size={16} />
         </button>
       </div>
 
-      {/* Context actions for selected text */}
-      {selectedText && (
-        <div
-          className={cn(
-            "px-3 py-3 border-b",
-            isDarkMode ? "border-gray-700 bg-gray-800" : "border-gray-100 bg-gray-50"
-          )}
-        >
-          <p
-            className={cn(
-              "text-xs mb-2 line-clamp-2 italic",
-              isDarkMode ? "text-gray-400" : "text-gray-500"
-            )}
-          >
-            &ldquo;{selectedText}&rdquo;
-          </p>
-          <ContextMenu
-            selectedText={selectedText}
-            onAction={handleContextAction}
-            isDarkMode={isDarkMode}
-          />
+      {/* Quick actions */}
+      <div className={cn("p-3 border-b", isDarkMode ? "border-gray-700" : "border-gray-100")}>
+        <p className={cn("text-xs mb-2", isDarkMode ? "text-gray-400" : "text-gray-500")}>
+          Quick actions
+        </p>
+        <div className="grid grid-cols-2 gap-1.5">
+          {QUICK_ACTIONS.map((action) => (
+            <button
+              key={action.label}
+              onClick={() => send(action.prompt)}
+              className={cn(
+                "text-xs px-3 py-2 rounded-lg text-left transition font-medium",
+                isDarkMode
+                  ? "bg-gray-800 hover:bg-gray-700 text-gray-200"
+                  : "bg-gray-50 hover:bg-gray-100 text-gray-700"
+              )}
+            >
+              {action.label}
+            </button>
+          ))}
         </div>
-      )}
+      </div>
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
-        {messages.map((msg, i) => (
-          <ChatBubble key={i} role={msg.role} content={msg.content} isDarkMode={isDarkMode} />
-        ))}
-        {loading && (
-          <div className="flex items-center gap-2">
-            <div className="w-6 h-6 bg-[#0F6E56] rounded-full flex items-center justify-center">
-              <span className="text-white text-xs font-bold">M</span>
+        {messages.length === 0 && (
+          <div className="flex flex-col items-center justify-center h-full gap-3 py-8">
+            <div className="w-10 h-10 rounded-full bg-[#0F6E56]/10 flex items-center justify-center">
+              <Sparkles size={18} className="text-[#0F6E56]" />
             </div>
+            <p className={cn("text-xs text-center", isDarkMode ? "text-gray-500" : "text-gray-400")}>
+              Select text in the PDF or use a quick action to get started
+            </p>
+          </div>
+        )}
+        {messages.map((msg, i) => (
+          <div key={i} className={cn("flex", msg.role === "user" ? "justify-end" : "justify-start")}>
             <div
               className={cn(
-                "px-3 py-2.5 rounded-2xl rounded-tl-sm",
-                isDarkMode ? "bg-gray-700" : "bg-gray-100"
+                "max-w-[85%] rounded-2xl px-3 py-2 text-xs leading-relaxed",
+                msg.role === "user"
+                  ? "bg-[#0F6E56] text-white rounded-br-sm"
+                  : isDarkMode
+                  ? "bg-gray-800 text-gray-200 rounded-bl-sm"
+                  : "bg-gray-100 text-gray-800 rounded-bl-sm"
+              )}
+            >
+              {msg.content}
+            </div>
+          </div>
+        ))}
+        {loading && (
+          <div className="flex justify-start">
+            <div
+              className={cn(
+                "rounded-2xl rounded-bl-sm px-3 py-2",
+                isDarkMode ? "bg-gray-800" : "bg-gray-100"
               )}
             >
               <Loader2 size={14} className="animate-spin text-[#0F6E56]" />
@@ -158,29 +158,34 @@ export function AIPanel({ bookId, chapterId, isDarkMode }: AIPanelProps) {
       </div>
 
       {/* Input */}
-      <div
-        className={cn(
-          "p-3 border-t",
-          isDarkMode ? "border-gray-700" : "border-gray-100"
+      <div className={cn("p-3 border-t", isDarkMode ? "border-gray-700" : "border-gray-100")}>
+        {selectedText && (
+          <div
+            className={cn(
+              "text-xs px-2 py-1.5 rounded-lg mb-2 italic truncate",
+              isDarkMode ? "bg-gray-800 text-gray-400" : "bg-gray-50 text-gray-500"
+            )}
+          >
+            📎 &ldquo;{selectedText.slice(0, 60)}{selectedText.length > 60 ? "…" : ""}&rdquo;
+          </div>
         )}
-      >
         <div className="flex gap-2">
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendMessage()}
-            placeholder="Ask anything..."
+            onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && send(input)}
+            placeholder="Ask anything…"
             className={cn(
-              "flex-1 text-sm px-3 py-2.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0F6E56] transition",
+              "flex-1 text-xs px-3 py-2 rounded-xl border outline-none transition",
               isDarkMode
-                ? "bg-gray-800 text-white placeholder:text-gray-500 border border-gray-700"
-                : "bg-gray-50 text-gray-900 placeholder:text-gray-400 border border-gray-200"
+                ? "bg-gray-800 border-gray-700 text-white placeholder:text-gray-500 focus:border-[#0F6E56]"
+                : "bg-gray-50 border-gray-200 text-gray-900 placeholder:text-gray-400 focus:border-[#0F6E56]"
             )}
           />
           <button
-            onClick={() => sendMessage()}
+            onClick={() => send(input)}
             disabled={!input.trim() || loading}
-            className="w-10 h-10 bg-[#0F6E56] hover:bg-[#085041] text-white rounded-xl flex items-center justify-center transition disabled:opacity-40"
+            className="p-2 bg-[#0F6E56] text-white rounded-xl hover:bg-[#085041] transition disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <Send size={14} />
           </button>

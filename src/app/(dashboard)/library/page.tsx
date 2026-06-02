@@ -94,7 +94,7 @@ export default function LibraryPage() {
       await axios.post("/api/books", {
         title: book.title,
         author: book.author,
-        fileUrl: book.coverUrl ?? "",
+        fileUrl: "",
         fileKey: "",
         fileSize: 0,
         pageCount: book.pages,

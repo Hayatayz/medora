@@ -1,14 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyToken } from "@/lib/auth/jwt";
 import { db } from "@/lib/db";
-import { uploadToS3 } from "@/lib/aws/s3";
-import { extractPDFText } from "@/lib/pdf/extractor";
-import { detectChapters } from "@/lib/pdf/chapterDetector";
-import { v4 as uuidv4 } from "uuid";
-import { writeFile, mkdir } from "fs/promises";
+import { verifyToken } from "@/lib/auth/jwt";
 import path from "path";
-
-const UPLOADS_DIR = path.join(process.cwd(), "public", "uploads");
+import fs from "fs";
 
 export async function POST(
   request: NextRequest,
@@ -17,141 +11,66 @@ export async function POST(
   try {
     const token = request.cookies.get("medora-token")?.value;
     const payload = token ? await verifyToken(token) : null;
-    if (!payload)
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!payload) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const { bookId } = await params;
 
-    const book = await db.book.findFirst({
-      where: { id: bookId, userId: payload.userId },
-    });
-    if (!book)
-      return NextResponse.json({ error: "Book not found" }, { status: 404 });
-
-    let formData: FormData;
-    try {
-      formData = await request.formData();
-    } catch {
-      return NextResponse.json(
-        { error: "Failed to parse form data" },
-        { status: 400 }
-      );
-    }
-
+    const formData = await request.formData();
     const file = formData.get("file") as File | null;
-    if (!file)
-      return NextResponse.json(
-        { error: "No file provided" },
-        { status: 400 }
-      );
+    if (!file) return NextResponse.json({ error: "No file provided" }, { status: 400 });
 
     if (file.type !== "application/pdf") {
-      return NextResponse.json(
-        { error: "Only PDF files are supported" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Only PDF files are allowed" }, { status: 400 });
     }
 
-    if (file.size > 50 * 1024 * 1024) {
-      return NextResponse.json(
-        { error: "File must be under 50MB" },
-        { status: 400 }
-      );
+    const MAX_SIZE = 50 * 1024 * 1024; // 50MB
+    if (file.size > MAX_SIZE) {
+      return NextResponse.json({ error: "File too large (max 50MB)" }, { status: 400 });
     }
 
-    // Convert file to buffer
-    const arrayBuffer = await file.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
+    const bytes = await file.arrayBuffer();
+    const buffer = Buffer.from(bytes);
 
-    const filename = `${uuidv4()}.pdf`;
-    const key = `books/${payload.userId}/${filename}`;
-    let fileUrl = "";
+    // Save to public/uploads
+    const uploadsDir = path.join(process.cwd(), "public", "uploads");
+    if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 
-    // Decide storage: S3 or local
-    const awsKey = process.env.AWS_ACCESS_KEY_ID;
-    const s3Configured =
-      awsKey && awsKey !== "placeholder" && awsKey.length > 5;
+    const fileKey = `${bookId}-${Date.now()}.pdf`;
+    const filePath = path.join(uploadsDir, fileKey);
+    fs.writeFileSync(filePath, buffer);
 
-    if (s3Configured) {
-      try {
-        fileUrl = await uploadToS3(buffer, key, "application/pdf");
-      } catch (s3Error) {
-        console.error("S3 upload failed:", s3Error);
-        return NextResponse.json(
-          { error: "File storage failed" },
-          { status: 500 }
-        );
-      }
-    } else {
-      // Development: save locally to public/uploads
-      try {
-        await mkdir(UPLOADS_DIR, { recursive: true });
-        await writeFile(path.join(UPLOADS_DIR, filename), buffer);
-        fileUrl = `/uploads/${filename}`;
-      } catch (fsError) {
-        console.error("Local file save failed:", fsError);
-        return NextResponse.json(
-          { error: "File save failed" },
-          { status: 500 }
-        );
-      }
-    }
+    const fileUrl = `/uploads/${fileKey}`;
 
-    // Extract text and detect chapters — never crash upload if this fails
+    // Get page count
     let pageCount = 0;
-    let chapters: ReturnType<typeof detectChapters> = [];
-
     try {
-      const extracted = await extractPDFText(buffer);
-      pageCount = extracted.pageCount;
-
-      if (extracted.text && extracted.text.length > 100) {
-        chapters = detectChapters(extracted.text);
-      }
-    } catch (extractError) {
-      console.warn(
-        "PDF extraction failed — upload continues without chapters:",
-        extractError
-      );
+      const { PDFParse } = require("pdf-parse");
+      const parser = new PDFParse();
+      const result = await parser.parse(buffer);
+      pageCount = result.numpages || 0;
+    } catch {
+      try {
+        const pdfParse = require("pdf-parse");
+        const result = await pdfParse(buffer);
+        pageCount = result.numpages || 0;
+      } catch { pageCount = 0; }
     }
 
-    // Update book record with file info
-    const updated = await db.book.update({
+    // Update book record
+    const book = await db.book.update({
       where: { id: bookId },
       data: {
         fileUrl,
-        fileKey: key,
+        fileKey,
         fileSize: file.size,
         pageCount,
         isProcessed: true,
       },
     });
 
-    // Save detected chapters
-    if (chapters.length > 0) {
-      await db.chapter.deleteMany({ where: { bookId } });
-      await db.chapter.createMany({
-        data: chapters.map((c) => ({
-          bookId,
-          title: c.title,
-          content: c.content,
-          orderIndex: c.orderIndex,
-          pageStart: c.pageStart,
-          pageEnd: c.pageEnd,
-        })),
-      });
-    }
-
-    return NextResponse.json({
-      book: updated,
-      chaptersDetected: chapters.length,
-      fileUrl,
-    });
-  } catch (error) {
-    console.error("Upload error:", error);
-    return NextResponse.json(
-      { error: "Upload failed" },
-      { status: 500 }
-    );
+    return NextResponse.json({ book, fileUrl });
+  } catch (e) {
+    console.error("Upload error:", e);
+    return NextResponse.json({ error: "Upload failed" }, { status: 500 });
   }
 }

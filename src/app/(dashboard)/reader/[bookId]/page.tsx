@@ -96,10 +96,32 @@ export default function ReaderPage() {
   return (
     <div
       className={cn(
-        "flex flex-col h-screen overflow-hidden",
+        "flex flex-col h-screen overflow-hidden relative",
         isDarkMode ? "bg-gray-900" : "bg-white"
       )}
     >
+      {/* Focus mode exit button — always visible when in focus mode */}
+      {isFocusMode && (
+        <div className="absolute top-4 right-4 z-50">
+          <button
+            onClick={() => useReaderStore.getState().toggleFocusMode()}
+            className="bg-black/60 hover:bg-black/80 text-white text-xs px-3 py-2 rounded-full backdrop-blur-sm transition flex items-center gap-2 shadow-lg"
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+            </svg>
+            Exit Focus
+          </button>
+        </div>
+      )}
+
       {/* Toolbar */}
       {!isFocusMode && (
         <ReaderToolbar
